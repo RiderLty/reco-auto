@@ -1,0 +1,10 @@
+[project]
+name = "reco-auto"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "mysc-core[all]>=1.0.1",
+    "opencv-python>=5.0.0.93",
+]
