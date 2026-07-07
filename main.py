@@ -6,17 +6,92 @@ from mysc_core.control import ControlAdapter, ControlKwargs, EnumDirection
 
 from core.reco_state import RecoState
 from interface.scrcpy_touch import ScrcpyTouchAdapter
+import os
+import numpy as np
+import time
 
+#适配分辨率 1080x1920 density 240
 
 # ------------------------------------------------------------
 # Demo RecoState 子类 — 替换 on_pic 为你的识别逻辑
 # ------------------------------------------------------------
 
+
 class DemoAuto(RecoState):
-    def on_pic(self, pic):
-        # TODO: 识别逻辑，通过 self.ta 操作触控
-        # 此方法跑在 worker 线程中，不会卡 GUI
-        pass
+    def __init__(self, ta):
+        super().__init__(ta)
+        self.state = None
+        self.click_on_find = []
+        self.templates = {}
+        for file in sorted([ x for x in os.listdir('templates/clickOnFind') if x.endswith('.jpg')] , key=lambda x: x):
+            print( "load type clickOnFind : ", file)
+            path = os.path.join('templates/clickOnFind', file)
+            data = np.fromfile(path, dtype=np.uint8)
+            img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+            if img is not None:
+                self.click_on_find.append(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        for file in [ x for x in os.listdir('templates') if x.endswith('.jpg')]:
+            print( "load type special : ", file)
+            path = os.path.join('templates', file)
+            data = np.fromfile(path, dtype=np.uint8)
+            img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+            if img is not None:
+                self.templates[file.split('.')[0]] = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    def match(self,gray,name):
+        if name not in self.templates:
+            return None
+        img = self.templates[name]
+        result = cv2.matchTemplate(gray, img, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        if max_val > 0.8:
+            h, w = img.shape[:2]
+            center_x = (max_loc[0] + w // 2) / gray.shape[1]
+            center_y = (max_loc[1] + h // 2) / gray.shape[0]
+            print(f"{name} matched: center=({center_x}, {center_y}), confidence={max_val:.3f}")
+            return center_x, center_y
+        return None
+
+
+    def on_pic(self, pic: np.ndarray):
+        gray = cv2.cvtColor(pic, cv2.COLOR_RGB2GRAY)
+        if self.state is None:
+            for img in self.click_on_find:
+                result = cv2.matchTemplate(gray, img, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                if max_val > 0.8:
+                    h, w = img.shape[:2]
+                    center_x = (max_loc[0] + w // 2) / pic.shape[1]
+                    center_y = (max_loc[1] + h // 2) / pic.shape[0]
+                    print(f"click_on_find matched: center=({center_x}, {center_y}), confidence={max_val:.3f}")
+                    self.ta.tap(center_x, center_y)  # trigger a tap at the matched position
+                    break
+
+        if self.state is None:
+            if (pos := self.match(gray,'获得奖励')) is not None:
+                self.ta.tap(pos[0], pos[1] - 0.2)  # trigger a tap at the matched position
+                
+            if (pos := self.match(gray,'选球')) is not None:
+                self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
+                self.state = '已选球'
+            if (pos := self.match(gray,'已逮捕')) is not None:
+                self.ta.tap(pos[0] - 0.3, pos[1])  # trigger a tap at the matched position
+            
+            if (pos := self.match(gray,'力量增效')) is not None:
+                self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
+                self.state = '力量增效OK'
+
+
+        if self.state == '已选球':
+            if (pos := self.match(gray,'逮捕')) is not None:
+                self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
+                self.state = None
+        
+        if self.state == '力量增效OK':
+            if (pos := self.match(gray,'冰雹')) is not None:
+                self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
+                self.state = None
+
 
 
 # ------------------------------------------------------------
