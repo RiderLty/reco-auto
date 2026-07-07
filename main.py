@@ -49,6 +49,8 @@ class DemoAuto(RecoState):
             center_x = (max_loc[0] + w // 2) / gray.shape[1]
             center_y = (max_loc[1] + h // 2) / gray.shape[0]
             print(f"{name} matched: center=({center_x}, {center_y}), confidence={max_val:.3f}")
+            time.sleep(0.5)
+            print("sleep 0.5s")
             return center_x, center_y
         return None
 
@@ -65,33 +67,52 @@ class DemoAuto(RecoState):
                     center_y = (max_loc[1] + h // 2) / pic.shape[0]
                     print(f"click_on_find matched: center=({center_x}, {center_y}), confidence={max_val:.3f}")
                     self.ta.tap(center_x, center_y)  # trigger a tap at the matched position
-                    break
+                    time.sleep(0.5)
+                    return
 
         if self.state is None:
             if (pos := self.match(gray,'获得奖励')) is not None:
                 self.ta.tap(pos[0], pos[1] - 0.2)  # trigger a tap at the matched position
-                
+                time.sleep(0.5)
+                return
+
             if (pos := self.match(gray,'选球')) is not None:
                 self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
                 self.state = '已选球'
+                time.sleep(0.5)
+                return
+            
+
             if (pos := self.match(gray,'已逮捕')) is not None:
                 self.ta.tap(pos[0] - 0.3, pos[1])  # trigger a tap at the matched position
+                time.sleep(0.5)
+                return
             
             if (pos := self.match(gray,'力量增效')) is not None:
+                time.sleep(1)
                 self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
                 self.state = '力量增效OK'
+                time.sleep(2)
+                return
 
 
         if self.state == '已选球':
             if (pos := self.match(gray,'逮捕')) is not None:
                 self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
                 self.state = None
+                time.sleep(0.5)
+                return
         
         if self.state == '力量增效OK':
             if (pos := self.match(gray,'冰雹')) is not None:
                 self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
+                time.sleep(0.5)
+                return
+            if (pos := self.match(gray,'印记')) is not None:
+                self.ta.tap(pos[0], pos[1])  # trigger a tap at the matched position
+                time.sleep(0.5)
                 self.state = None
-
+                return
 
 
 # ------------------------------------------------------------
