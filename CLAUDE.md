@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-reco-auto is an Android device automation tool that combines screen recognition (via OpenCV) with scrcpy-based touch control. It's in early development (v0.1.0, pre-initial commit).
+reco-auto is an Android device automation tool that combines screen recognition (via OpenCV template matching) with scrcpy-based touch control. The primary use case is automating gameplay in mobile games by recognizing UI elements on screen and issuing touch events in response.
+
+Requires Python 3.12.
 
 ## Dev Commands
 
@@ -12,49 +14,60 @@ reco-auto is an Android device automation tool that combines screen recognition 
 # Activate environment
 .venv\Scripts\activate
 
-# Run the main demo script
+# Run the main automation script
 uv run python main.py
 
 # Add a dependency
 uv add <package-name>
-
-# Update lockfile
-uv lock
-
-# Run a single Python file
-uv run python path/to/file.py
 ```
 
 ## Architecture
 
 ```
-main.py                     — Entry point / demo: device connection, touch gestures, video streaming
+main.py                          — Entry point / game automation demo
 core/
-  reco-state.py             — RecoState: state machine for picture recognition events (callback-driven)
+  reco_state.py                  — RecoState: state machine for frame recognition (callback-driven)
 interface/
-  touchAdapter.py           — TouchAdapter: touch ID allocation, down/up/move/click abstraction
+  touchAdapter.py                — TouchAdapter (ABC): abstract touch API (tap, swipe, long_press, multi-touch)
+  scrcpy_touch.py                — ScrcpyTouchAdapter: concrete impl using ControlAdapter
+templates/
+  clickOnFind/                   — Templates matched only in default state ("always click when seen")
+  *.jpg                          — Templates matched with state-aware logic
 ```
 
-The project builds on **`mysc-core[all]`** (a Scrcpy control library by Me2sY), which provides:
+### Library layer (`lib/MYSC-Core/`)
 
-- **`VideoAdapter`** / **`VideoKwargs`** — Scrcpy H264/H265 video streaming via pyav, with frame callback support. Call `.connect(adb_device)` to start streaming, `.get_ndarray()` / `.get_image()` to grab frames.
-- **`ControlAdapter`** / **`ControlKwargs`** — Device control over scrcpy control socket. Supports touch events, text paste, scroll, UHID keyboard/mouse/gamepad. Coordinates use `ScalePointR` (relative positioning with direction awareness: `EnumDirection.VERTICAL` / `HORIZONTAL`).
-- **`Session`** — Combines video, audio, and control adapters into one connection.
-- **`MYDevice`** / **`JSDeviceInfo`** — Device info caching (brand, model, SDK, release), USB/TCP-IP connection management.
-- **Coordinate system** (`mysc_core.utils.vector`): `ScalePointR(ratio_x, ratio_y, direction)` for device-agnostic relative positioning; `Coordinate` for physical resolution with rotation handling.
+The project vendors the **`mysc-core`** Scrcpy control library (by Me2sY). It provides:
 
-## Key Patterns
+- **`VideoAdapter`** — H264/H265 video streaming via pyav. `.connect(adb_device)` starts streaming; `.get_ndarray()` / `.get_image()` grab frames. `VideoKwargs` configures codec, max_fps, display_id.
+- **`ControlAdapter`** — Scrcpy control socket. Touch events, text paste, scroll, UHID keyboard/mouse. `f_touch_spr(EnumAction, ScalePointR, finger_id)` for touch. `ControlKwargs` for screen/power settings.
+- **`Session`** — Combines video, audio, and control adapters. `Session.from_dict(device, config)` is the preferred constructor pattern.
+- **`MYDevice` / `JSDeviceInfo`** — Device info caching (brand, model, SDK, release), USB/TCP-IP connection management.
+- **Coordinates** (`mysc_core.utils.vector`): `ScalePointR(ratio_x, ratio_y, direction)` for device-agnostic relative positioning; `EnumDirection.VERTICAL` | `HORIZONTAL`.
 
-- **Adapters follow a connect/disconnect lifecycle** — `Adapter.connect(adb_device)` returns `self`, starts worker threads; `.disconnect()` tears down.
-- **ScalePointR for touch targeting** — Always use relative coordinates (`ScalePointR(0.2, 0.3, EnumDirection.VERTICAL)`) rather than absolute pixels, so gestures work across device resolutions.
-- **ControlAdapter uses a send queue** — Methods like `f_touch_spr()` enqueue packets onto a background thread; optional `ignore_repeat_check` bypasses dedup.
-- **RecoState is a state machine stub** — The `on_pic(pic)` callback is the hook point for frame recognition logic; `pic_now_handling` flag prevents re-entrance.
-- **TouchAdapter manages touch ID allocation** — IDs 0-9 are tracked in an `allocated_ids` set; `touch_down` allocates, `touch_up` frees.
+### TouchAdapter hierarchy
 
-## Dependencies
+`TouchAdapter` (ABC) defines the abstract touch primitives — `tap`, `swipe`, `long_press`, `touch_down/move/up` — all using relative coordinates (0.0–1.0). It includes a built-in finger ID pool (0–9).
 
-| Package | Version | Purpose |
-|---|---|---|
-| `mysc-core[all]` | >=1.0.1 | Scrcpy device control (video, touch, keyboard, gamepad) |
-| `opencv-python` | >=5.0.0.93 | Computer vision for screen recognition |
-| `adbutils` | (transitive) | ADB device discovery and communication |
+`ScrcpyTouchAdapter` is the concrete implementation: it maps abstract primitives to `ControlAdapter.f_touch_spr()` calls using `ScalePointR` and `EnumDirection`. It tracks per-finger last-known positions so `touch_up` always sends the correct coordinate.
+
+### Recognition state machine
+
+`RecoState.process(pic)` is the frame entry point. It calls `on_pic(pic)` (subclass hook) with re-entrance protection: if the previous `on_pic` hasn't returned, the new frame is silently dropped.
+
+Subclasses implement `on_pic` and access `self.ta` (a `TouchAdapter`) to issue touch events.
+
+### Template matching (main.py pattern)
+
+Two tiers of templates:
+1. **`templates/clickOnFind/*.jpg`** — Matched only when `state is None`. If any template matches (confidence > 0.8), a tap is issued at the match center. These represent "always dismiss" popups/buttons.
+2. **`templates/*.jpg`** — Matched with explicit `self.match(gray, name)` calls, gated by the current `self.state`. State transitions drive which templates are active.
+
+### Threading model (main.py)
+
+A double-buffering approach with a single shared frame:
+
+- **Main thread** — Grabs frames from `va.get_ndarray()`, writes the latest one under `_lock`, renders it in an OpenCV window.
+- **Worker thread** — Reads the latest frame under `_lock`, feeds it to `reco.process()`. If no frame is available, waits briefly.
+
+This decouples the video framerate from the (potentially slow) recognition logic, dropping frames when the worker is busy.

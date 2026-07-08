@@ -3,13 +3,14 @@ import cv2
 from adbutils import adb
 from mysc_core.video import VideoAdapter, VideoKwargs
 from mysc_core.control import ControlAdapter, ControlKwargs, EnumDirection
-
+from mysc_core.session import Session  
 from core.reco_state import RecoState
 from interface.scrcpy_touch import ScrcpyTouchAdapter
 import os
 import numpy as np
 import time
-
+from dataclasses import dataclass  
+from typing import Optional  
 #适配分辨率 1080x1920 density 240
 
 # ------------------------------------------------------------
@@ -119,27 +120,38 @@ class DemoAuto(RecoState):
 # Main
 # ------------------------------------------------------------
 
+
+
 device = adb.device_list()[0]
 print(device)
-
+displayID = input("请输入 displayID,默认0: ")
+if displayID == '':
+    displayID = 0
+else:
+    displayID = int(displayID)
 # 控制适配器
-ca = ControlAdapter(
-    ControlKwargs(_screen_status=ControlKwargs.EnumScreenStatus.ON)
-).connect(device)
+
 
 # 触控 & 状态机
-ta = ScrcpyTouchAdapter(ca)
-ta.direction = EnumDirection.HORIZONTAL  # 横屏游戏
-reco = DemoAuto(ta)
 
 # 视频适配器
 va = VideoAdapter(
     VideoKwargs(
         video_codec=VideoKwargs.EnumVideoCodec.H264,
         max_fps=60,
+        display_id=displayID
     )
 )
 va.connect(device)
+
+ca = ControlAdapter(
+    ControlKwargs(_screen_status=ControlKwargs.EnumScreenStatus.ON, display_id=displayID)
+).connect(device)
+
+ta = ScrcpyTouchAdapter(ca)
+ta.direction = EnumDirection.HORIZONTAL  # 横屏游戏
+reco = DemoAuto(ta)
+
 
 # ------------------------------------------------------------
 # 帧共享：主线程写，worker 线程取最新
@@ -170,6 +182,7 @@ threading.Thread(target=_worker, daemon=True).start()
 # ------------------------------------------------------------
 
 try:
+    init = False
     while True:
         data = va.get_ndarray(frame_format='rgb24')
         if data is None:
@@ -179,7 +192,11 @@ try:
             _latest_frame = data  # 覆盖旧帧，不堆积
 
         bgr = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
-        cv2.imshow('Device Screen', bgr)
+        if not init:
+            init = True
+            cv2.namedWindow('my_window', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+            cv2.resizeWindow('my_window', bgr.shape[1] // 4, bgr.shape[0] // 4)
+        cv2.imshow('my_window', bgr)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):

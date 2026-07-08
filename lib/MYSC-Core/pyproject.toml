@@ -1,0 +1,32 @@
+[project]
+name = "mysc-core"
+version = "1.0.1"
+description = "MYScrcpy Core. Python implementation of scrcpy V3.3 API client for easy integration and secondary development."
+readme = "README.md"
+authors = [
+    { name = "Me2sY", email = "me2sy@outlook.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "adbutils>=2.12.0",
+    "av>=16.1.0",
+    "loguru>=0.7.3",
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Chinese (Simplified)",
+    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture"
+]
+
+[project.optional-dependencies]
+all = [
+    "numpy>=2.4.3",
+    "pyperclip>=1.11.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.13,<0.10.0"]
+build-backend = "uv_build"
